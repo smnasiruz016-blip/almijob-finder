@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+}
+
+enum RemoteMode {
+  REMOTE
+  HYBRID
+  ONSITE
+  FLEXIBLE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+  TEMPORARY
+}
+
+enum AlertFrequency {
+  DAILY
+  WEEKLY
+}
+
+model User {
+  id            String          @id @default(cuid())
+  name          String
+  email         String          @unique
+  passwordHash  String
+  role          UserRole        @default(USER)
+  subscriptionTier SubscriptionTier @default(FREE)
+  sessions      Session[]
+  resumes       Resume[]
+  searches      JobSearch[]
+  searchHistory SearchHistory[]
+  savedJobs     SavedJob[]
+  savedSearches SavedSearch[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Resume {
+  id                String   @id @default(cuid())
+  userId            String
+  originalFilename  String
+  storagePath       String
+  mimeType          String
+  extractedText     String   @db.Text
+  parsedName        String?
+  parsedEmail       String?
+  parsedPhone       String?
+  skills            String[]
+  experienceKeywords String[]
+  educationKeywords String[]
+  preferredRoles    String[]
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+}
+
+model JobSearch {
+  id             String           @id @default(cuid())
+  userId         String
+  desiredTitle   String
+  keyword        String?
+  company        String?
+  country        String
+  state          String?
+  city           String?
+  remoteMode     RemoteMode?
+  employmentType EmploymentType?
+  postedWithinDays Int?
+  salaryMin      Int?
+  salaryMax      Int?
+  latestResults  Json?
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history        SearchHistory[]
+  createdAt      DateTime         @default(now())
+}
+
+model SearchHistory {
+  id           String    @id @default(cuid())
+  userId       String
+  searchId     String?
+  snapshot     Json
+  resultsCount Int
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  search       JobSearch? @relation(fields: [searchId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+}
+
+model SavedJob {
+  id            String   @id @default(cuid())
+  userId        String
+  externalJobId String
+  source        String
+  title         String
+  company       String
+  location      String
+  applyUrl      String
+  payload       Json
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, externalJobId, source])
+}
+
+model SavedSearch {
+  id             String         @id @default(cuid())
+  userId         String
+  name           String
+  querySnapshot  Json
+  alertsEnabled  Boolean        @default(false)
+  alertFrequency AlertFrequency @default(DAILY)
+  lastAlertedAt  DateTime?
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+}
+
+model JobResultCache {
+  id            String   @id @default(cuid())
+  externalJobId String
+  source        String
+  title         String
+  company       String
+  location      String
+  postedDate    DateTime?
+  payload       Json
+  createdAt     DateTime @default(now())
+
+  @@unique([externalJobId, source])
+}
