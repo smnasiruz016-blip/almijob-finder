@@ -720,7 +720,7 @@ export function DashboardShell({
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <Input name="desiredTitle" placeholder="Desired job title" required value={formState.desiredTitle} onChange={(event) => updateForm("desiredTitle", event.target.value)} />
+            <Input name="desiredTitle" placeholder="Type any job title (e.g. Nurse, Accountant, Driver...)" required value={formState.desiredTitle} onChange={(event) => updateForm("desiredTitle", event.target.value)} />
             <Input name="keyword" placeholder="Keyword or skill (optional)" value={formState.keyword} onChange={(event) => updateForm("keyword", event.target.value)} />
             <Input name="company" placeholder="Company (optional)" value={formState.company} onChange={(event) => updateForm("company", event.target.value)} />
             <Select
