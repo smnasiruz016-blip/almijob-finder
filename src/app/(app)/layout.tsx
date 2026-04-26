@@ -1,55 +1,27 @@
 import Link from "next/link";
-import { BellRing, Search, UserRound } from "lucide-react";
+import { BellRing, Building2, Search, UserRound, Zap } from "lucide-react";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { requireUser } from "@/lib/auth";
-
-export default async function AppLayout({
-  children
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = await requireUser();
-
   return (
-    <div className="min-h-screen py-4 md:py-6">
+    <div style={{ minHeight: "100vh", padding: "1rem 0 3rem" }}>
       <div className="page-shell">
-        <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <SidebarNav user={user} className="hidden xl:block" />
-          <div className="space-y-6">
-            <header className="glass-panel flex flex-col gap-4 rounded-[2rem] px-5 py-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-slate-950">Dashboard</p>
-                <p className="text-sm text-slate-500">Find jobs faster using your resume and cleaner matching signals.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/dashboard#search"
-                  className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50"
-                >
-                  <Search className="h-4 w-4" />
-                  New search
-                </Link>
-                <Link
-                  href="/dashboard#alerts"
-                  className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50"
-                >
-                  <BellRing className="h-4 w-4" />
-                  Alerts
-                </Link>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm text-slate-700">
-                  <UserRound className="h-4 w-4" />
-                  {user.email}
-                </div>
-                <form action="/api/auth/logout" method="POST">
-                  <button className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
-                    Log out
-                  </button>
-                </form>
+        <div style={{ display: "grid", gap: "1.25rem" }} className="xl:grid-cols-[260px_minmax(0,1fr)]">
+          <SidebarNav user={user} className="hidden xl:flex" />
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            <header className="glass-panel" style={{ borderRadius: "16px", padding: "0.9rem 1.25rem", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
+              <div><p style={{ fontSize: "1.1rem", fontWeight: 800 }}>Dashboard</p><p style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Welcome back -- find your next opportunity</p></div>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
+                <Link href="/dashboard#search" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "0.45rem 0.9rem", borderRadius: "8px", background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: "0.82rem", fontWeight: 600 }}><Search style={{ width: 13, height: 13 }} /> Search</Link>
+                <Link href="/dashboard#alerts" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "0.45rem 0.9rem", borderRadius: "8px", background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: "0.82rem", fontWeight: 600 }}><BellRing style={{ width: 13, height: 13 }} /> Alerts</Link>
+                <Link href="/employer" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "0.45rem 0.9rem", borderRadius: "8px", background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: "0.82rem", fontWeight: 600 }}><Building2 style={{ width: 13, height: 13 }} /> Employers</Link>
+                {user.subscriptionTier !== "PRO" && (<a href="#" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "0.45rem 0.9rem", borderRadius: "8px", background: "rgba(0,229,184,0.1)", border: "1px solid rgba(0,229,184,0.2)", color: "var(--primary)", fontSize: "0.82rem", fontWeight: 700 }}><Zap style={{ width: 13, height: 13 }} /> Upgrade</a>)}
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "0.45rem 0.9rem", borderRadius: "8px", background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: "0.82rem" }}><UserRound style={{ width: 13, height: 13 }} /><span style={{ maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</span></div>
+                <form action="/api/auth/logout" method="POST"><button style={{ padding: "0.45rem 0.9rem", borderRadius: "8px", background: "var(--surface3)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer" }}>Log out</button></form>
               </div>
             </header>
-            <div className="xl:hidden">
-              <SidebarNav user={user} />
-            </div>
+            <div className="xl:hidden"><SidebarNav user={user} /></div>
             {children}
           </div>
         </div>
