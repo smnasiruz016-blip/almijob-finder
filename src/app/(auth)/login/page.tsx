@@ -3,41 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/forms/auth-form";
 import { getCurrentUser } from "@/lib/auth";
-
+import { Globe2, Search, Sparkles, Zap } from "lucide-react";
+const perks = [{ icon: Globe2, title: "200+ Countries", desc: "Search jobs anywhere" },{ icon: Search, title: "596 Live Sources", desc: "Real jobs from trusted boards" },{ icon: Sparkles, title: "AI Resume Match", desc: "See your score for every role" },{ icon: Zap, title: "Smart Alerts", desc: "Get notified about new matches" }];
 export default async function LoginPage() {
   const user = await getCurrentUser();
-
-  if (user) {
-    redirect("/dashboard");
-  }
-
-  return (
-    <main className="page-shell py-16">
-      <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
-        <section className="glass-panel rounded-[2rem] p-8">
-          <Image src="/brand/almi-latest.png" alt="Almiworld" width={180} height={70} className="h-auto w-[150px]" />
-          <h1 className="mt-6 font-[family-name:var(--font-display)] text-4xl font-bold text-slate-950">
-            Welcome back
-          </h1>
-          <p className="mt-3 text-sm leading-7 text-slate-600">
-            Pick up where you left off with saved searches, resume insights, and ranked job matches.
-          </p>
-          <ul className="mt-5 space-y-2 text-sm leading-7 text-slate-600">
-            <li>- Search worldwide or by country, state, and city</li>
-            <li>- Track saved jobs and daily usage</li>
-            <li>- Use resume feedback before applying</li>
-          </ul>
-        </section>
-        <div>
-          <AuthForm mode="login" />
-          <p className="mt-6 text-center text-sm text-slate-500">
-            Need an account?{" "}
-            <Link href="/signup" className="font-semibold text-teal-700">
-              Sign up
-            </Link>
-          </p>
-        </div>
-      </div>
-    </main>
-  );
-}
+  if (user) redirect("/dashboard");
+  return (<main style={{ minHeight: "100vh", display: "flex", alignItems: "center", position: "relative", zIndex: 1 }}><div className="page-shell" style={{ padding: "2rem 0", width: "100%" }}><div style={{ display: "grid", gap: "2rem", alignItems: "center", maxWidth: "960px", margin: "0 auto" }} className="lg:grid-cols-2"><div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}><a href="https://www.almiworld.com"><Image src="/brand/almi-latest.png" alt="Almiworld" width={130} height={48} style={{ height: "34px", width: "auto" }} /></a><div><h1 style={{ fontSize: "clamp(1.8rem,4vw,2.8rem)", fontWeight: 800, marginBottom: "0.75rem" }}>Welcome back to<br /><span style={{ background: "linear-gradient(135deg,#00e5b8,#4f93ff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>AlmiJob Finder</span></h1><p style={{ fontSize: "0.95rem", color: "var(--text2)", lineHeight: 1.7 }}>Pick up where you left off. Your saved searches, resume insights, and job matches are waiting.</p></div><div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr" }}>{perks.map((p) => (<div key={p.title} className="card" style={{ padding: "1rem", display: "flex", gap: "10px" }}><div style={{ width: "32px", height: "32px", borderRadius: "8px", background: "rgba(0,229,184,0.1)", border: "1px solid rgba(0,229,184,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}><p.icon style={{ width: 14, height: 14, color: "var(--primary)" }} /></div><div><p style={{ fontSize: "0.82rem", fontWeight: 700 }}>{p.title}</p><p style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{p.desc}</p></div></div>))}</div><p style={{ fontSize: "0.8rem", color: "var(--text3)" }}>Don&apos;t have an account?{" "}<Link href="/signup" style={{ color: "var(--primary)", fontWeight: 600 }}>Create one free</Link></p></div><div className="glass-panel" style={{ borderRadius: "20px", padding: "2rem", border: "1px solid rgba(0,229,184,0.1)" }}><h2 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "0.4rem" }}>Log in to your account</h2><p style={{ fontSize: "0.82rem", color: "var(--text3)", marginBottom: "1.5rem" }}>Enter your email and password below</p><AuthForm mode="login" /><p style={{ marginTop: "1.25rem", textAlign: "center", fontSize: "0.82rem", color: "var(--text3)" }}>No account yet?{" "}<Link href="/signup" style={{ color: "var(--primary)", fontWeight: 600 }}>Free signup</Link></p></div></div></div></main>);}
