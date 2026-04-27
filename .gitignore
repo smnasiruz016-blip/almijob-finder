@@ -12,3 +12,5 @@ prisma/dev.db
 zip-staging
 .vercel
 almijob-finder-clean-jobfinder.zip
+scripts/data/*.xlsx
+scripts/data/.xlsx-extract/
