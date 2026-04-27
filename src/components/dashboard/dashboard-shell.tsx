@@ -1136,24 +1136,7 @@ export function DashboardShell({
               ) : null}
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <Select
-                value={selectedRoleProfile?.title ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value) {
-                    updateForm("desiredTitle", value);
-                  }
-                }}
-              >
-                <option value="">Choose a common role</option>
-                {ROLE_OPTIONS.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </Select>
-
+            <div className="mt-4 grid gap-4">
               <Select
                 value=""
                 onChange={(event) => {
