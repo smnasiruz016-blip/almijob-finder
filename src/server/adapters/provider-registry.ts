@@ -1,5 +1,6 @@
 import { mapCountryToAdzunaCode } from "@/lib/location";
 import { log } from "@/lib/logger";
+import { getPreferredProviderQuery, matchesSearchQuery } from "@/lib/search-query";
 import { getProviderRuntimeConfig } from "@/server/adapters/provider-config";
 import type { JobSourceAdapter } from "@/server/adapters/types";
 import { mockAdapters } from "@/server/adapters/mock-jobs";
@@ -56,6 +57,23 @@ type RemotiveApiJob = {
   tags?: string[];
 };
 
+type JoobleApiResponse = {
+  jobs?: JoobleApiJob[];
+};
+
+type JoobleApiJob = {
+  id?: number | string;
+  title?: string;
+  company?: string;
+  location?: string;
+  link?: string;
+  salary?: string;
+  type?: string;
+  snippet?: string;
+  source?: string;
+  updated?: string;
+};
+
 function sanitizeRemotiveJobs(payload: unknown): RemotiveApiJob[] {
   if (!payload || typeof payload !== "object" || !("jobs" in payload)) {
     return [];
@@ -79,23 +97,33 @@ function buildDescriptionSnippet(value: string | undefined, fallback: string) {
   return snippet || fallback;
 }
 
-function textMatchesQuery(value: string, query?: string) {
-  const trimmed = (query ?? "").trim().toLowerCase();
-  if (!trimmed) {
-    return true;
-  }
-
-  return trimmed
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((part) => value.includes(part));
-}
-
 function getLocationNeedles(input: JobSearchInput) {
   return [input.city, input.state, input.country]
     .filter((value): value is string => Boolean(value && value.trim()))
     .map((value) => value.trim().toLowerCase())
     .filter((value) => value !== "worldwide");
+}
+
+function sanitizeJoobleJobs(payload: unknown): JoobleApiJob[] {
+  if (!payload || typeof payload !== "object" || !("jobs" in payload)) {
+    return [];
+  }
+
+  const jobs = (payload as JoobleApiResponse).jobs;
+  if (!Array.isArray(jobs)) {
+    return [];
+  }
+
+  return jobs.filter((item): item is JoobleApiJob => typeof item === "object" && item !== null);
+}
+
+function matchesLocationNeedles(location: string, description: string, needles: string[]) {
+  if (!needles.length) {
+    return true;
+  }
+
+  const haystack = `${location} ${description}`.toLowerCase();
+  return needles.some((needle) => haystack.includes(needle));
 }
 
 function matchesPostedWithin(postedDate: string | undefined, postedWithinDays?: number) {
@@ -190,6 +218,28 @@ export function normalizeRemotiveJob(job: RemotiveApiJob): NormalizedJob {
   };
 }
 
+export function normalizeJoobleJob(job: JoobleApiJob, input: JobSearchInput): NormalizedJob {
+  return {
+    externalJobId: String(job.id ?? `${job.title ?? "job"}-${job.company ?? "company"}-${job.location ?? "location"}`),
+    source: "Jooble",
+    sourceType: "live",
+    title: job.title ?? input.desiredTitle,
+    company: job.company ?? "Unknown company",
+    location: job.location ?? input.country ?? "Worldwide",
+    salary: job.salary?.trim() || undefined,
+    jobType: job.type?.toUpperCase().replace(/[-\s]+/g, "_"),
+    remoteStatus: input.remoteMode,
+    descriptionSnippet: buildDescriptionSnippet(job.snippet, "Role supplied by Jooble."),
+    applyUrl: job.link ?? "",
+    postedDate: job.updated,
+    keywords: [input.desiredTitle, input.keyword, job.title ?? "", job.company ?? "", job.source ?? ""].filter(Boolean) as string[],
+    providerMetadata: {
+      attributionLabel: "Source: Jooble",
+      attributionUrl: job.link
+    }
+  };
+}
+
 class RemoteOkAdapter implements JobSourceAdapter {
   source = "RemoteOK";
   sourceType = "live" as const;
@@ -213,17 +263,17 @@ class RemoteOkAdapter implements JobSourceAdapter {
     }
 
     const data = sanitizeRemoteOkJobs(await response.json());
-    const titleNeedle = input.desiredTitle.trim().toLowerCase();
-    const keywordNeedle = (input.keyword ?? "").trim().toLowerCase();
+    const titleNeedle = getPreferredProviderQuery(input.desiredTitle);
+    const keywordNeedle = getPreferredProviderQuery(input.keyword);
+    const locationNeedles = getLocationNeedles(input);
 
     return data
       .map((job) => normalizeRemoteOkJob(job))
       .filter((job) => {
         const haystack = `${job.title} ${job.descriptionSnippet} ${job.keywords.join(" ")}`.toLowerCase();
-        const titleMatch = titleNeedle ? haystack.includes(titleNeedle) : true;
-        const keywordMatch = keywordNeedle
-          ? haystack.includes(keywordNeedle) || keywordNeedle.split(" ").every((part) => haystack.includes(part))
-          : true;
+        const locationMatch = matchesLocationNeedles(job.location, job.descriptionSnippet, locationNeedles);
+        const titleMatch = matchesSearchQuery(haystack, titleNeedle);
+        const keywordMatch = matchesSearchQuery(haystack, keywordNeedle);
         const companyMatch = input.company ? job.company.toLowerCase().includes(input.company.toLowerCase()) : true;
         const salaryMatch = input.salaryMin ? (job.salaryMax ?? 0) >= input.salaryMin : true;
         const postedMatch = input.postedWithinDays
@@ -231,7 +281,7 @@ class RemoteOkAdapter implements JobSourceAdapter {
             Date.now() - new Date(job.postedDate!).getTime() <= input.postedWithinDays * 24 * 60 * 60 * 1000
           : true;
 
-        return titleMatch && keywordMatch && companyMatch && salaryMatch && postedMatch;
+        return titleMatch && keywordMatch && companyMatch && salaryMatch && postedMatch && locationMatch;
       });
   }
 }
@@ -247,7 +297,10 @@ class RemotiveAdapter implements JobSourceAdapter {
   async searchJobs(input: JobSearchInput): Promise<NormalizedJob[]> {
     const config = getProviderRuntimeConfig();
     const url = new URL(config.remotiveApiUrl);
-    const query = [input.desiredTitle, input.keyword].filter(Boolean).join(" ").trim();
+    const query = [getPreferredProviderQuery(input.desiredTitle), getPreferredProviderQuery(input.keyword)]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
 
     if (query) {
       url.searchParams.set("search", query);
@@ -266,19 +319,73 @@ class RemotiveAdapter implements JobSourceAdapter {
 
     const jobs = sanitizeRemotiveJobs(await response.json()).map((job) => normalizeRemotiveJob(job));
     const locationNeedles = getLocationNeedles(input);
-    const titleNeedle = input.desiredTitle.trim().toLowerCase();
-    const keywordNeedle = (input.keyword ?? "").trim().toLowerCase();
+    const titleNeedle = getPreferredProviderQuery(input.desiredTitle);
+    const keywordNeedle = getPreferredProviderQuery(input.keyword);
 
     return jobs.filter((job) => {
       const haystack = `${job.title} ${job.descriptionSnippet} ${job.keywords.join(" ")}`.toLowerCase();
-      const locationHaystack = `${job.location} ${job.descriptionSnippet}`.toLowerCase();
-      const titleMatch = textMatchesQuery(haystack, titleNeedle);
-      const keywordMatch = textMatchesQuery(haystack, keywordNeedle);
+      const titleMatch = matchesSearchQuery(haystack, titleNeedle);
+      const keywordMatch = matchesSearchQuery(haystack, keywordNeedle);
       const companyMatch = input.company ? job.company.toLowerCase().includes(input.company.toLowerCase()) : true;
-      const locationMatch = locationNeedles.length ? locationNeedles.some((needle) => locationHaystack.includes(needle)) : true;
+      const locationMatch = matchesLocationNeedles(job.location, job.descriptionSnippet, locationNeedles);
       const postedMatch = matchesPostedWithin(job.postedDate, input.postedWithinDays);
 
       return titleMatch && keywordMatch && companyMatch && locationMatch && postedMatch;
+    });
+  }
+}
+
+class JoobleAdapter implements JobSourceAdapter {
+  source = "Jooble";
+  sourceType = "live" as const;
+
+  isEnabled() {
+    const config = getProviderRuntimeConfig();
+    return config.joobleEnabled && Boolean(config.joobleApiKey);
+  }
+
+  async searchJobs(input: JobSearchInput): Promise<NormalizedJob[]> {
+    const config = getProviderRuntimeConfig();
+    const endpoint = `${config.joobleApiUrl.replace(/\/+$/, "")}/${config.joobleApiKey}`;
+    const locationNeedles = getLocationNeedles(input);
+    const titleNeedle = getPreferredProviderQuery(input.desiredTitle);
+    const keywordNeedle = getPreferredProviderQuery(input.keyword);
+    const locationQuery = [input.city, input.state, input.country].filter(Boolean).join(", ");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        keywords: [titleNeedle, keywordNeedle].filter(Boolean).join(" ").trim(),
+        location: locationQuery || undefined,
+        page: 1
+      }),
+      next: { revalidate: 1800 }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Jooble request failed with status ${response.status}`);
+    }
+
+    const jobs = sanitizeJoobleJobs(await response.json()).map((job) => normalizeJoobleJob(job, input));
+
+    return jobs.filter((job) => {
+      const haystack = `${job.title} ${job.descriptionSnippet} ${job.keywords.join(" ")}`.toLowerCase();
+      const titleMatch = matchesSearchQuery(haystack, titleNeedle);
+      const keywordMatch = matchesSearchQuery(haystack, keywordNeedle);
+      const companyMatch = input.company ? job.company.toLowerCase().includes(input.company.toLowerCase()) : true;
+      const locationMatch = matchesLocationNeedles(job.location, job.descriptionSnippet, locationNeedles);
+      const salaryMatch = input.salaryMin
+        ? (() => {
+            const numericSalary = Number((job.salary ?? "").replace(/[^0-9]/g, ""));
+            return Number.isFinite(numericSalary) ? numericSalary >= input.salaryMin : true;
+          })()
+        : true;
+      const postedMatch = matchesPostedWithin(job.postedDate, input.postedWithinDays);
+
+      return titleMatch && keywordMatch && companyMatch && locationMatch && salaryMatch && postedMatch;
     });
   }
 }
@@ -304,7 +411,10 @@ class AdzunaAdapter implements JobSourceAdapter {
     url.searchParams.set("app_id", config.adzunaAppId!);
     url.searchParams.set("app_key", config.adzunaAppKey!);
     url.searchParams.set("results_per_page", "20");
-    url.searchParams.set("what", [input.desiredTitle, input.keyword].filter(Boolean).join(" "));
+    url.searchParams.set(
+      "what",
+      [getPreferredProviderQuery(input.desiredTitle), getPreferredProviderQuery(input.keyword)].filter(Boolean).join(" ")
+    );
 
     const where = [input.city, input.state, input.country].filter(Boolean).join(", ");
     if (where) {
@@ -341,11 +451,14 @@ class AdzunaAdapter implements JobSourceAdapter {
 }
 
 export function getJobAdapters() {
-  return [new RemoteOkAdapter(), new RemotiveAdapter(), new AdzunaAdapter(), ...mockAdapters].filter((adapter) => adapter.isEnabled());
+  return [new RemoteOkAdapter(), new RemotiveAdapter(), new JoobleAdapter(), new AdzunaAdapter(), ...mockAdapters].filter((adapter) =>
+    adapter.isEnabled()
+  );
 }
 
 export async function fetchFromAdapters(input: JobSearchInput) {
   const adapters = getJobAdapters();
+  const config = getProviderRuntimeConfig();
   const liveAdapters = adapters.filter((adapter) => adapter.sourceType === "live");
   const mockOnlyAdapters = adapters.filter((adapter) => adapter.sourceType !== "live");
 
@@ -386,7 +499,7 @@ export async function fetchFromAdapters(input: JobSearchInput) {
     }
   }
 
-  const shouldUseFallback = liveResults.length === 0;
+  const shouldUseFallback = liveResults.length === 0 && config.mockFallbackEnabled;
   const fallbackJobs = shouldUseFallback ? (await Promise.all(mockOnlyAdapters.map((adapter) => adapter.searchJobs(input)))).flat() : [];
 
   if (shouldUseFallback) {
@@ -410,7 +523,12 @@ export async function fetchFromAdapters(input: JobSearchInput) {
         sourceType: "mock",
         status: "disabled",
         results: 0,
-        message: "Fallback coverage stayed on standby because live providers returned results."
+        message:
+          liveResults.length > 0
+            ? "Sample fallback stayed on standby because live providers returned results."
+            : config.mockFallbackEnabled
+              ? "Sample fallback stayed on standby because it was not needed."
+              : "Sample fallback is turned off for this environment so only live jobs are shown."
       });
     }
   }

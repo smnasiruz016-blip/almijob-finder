@@ -1,5 +1,7 @@
 import type { JobSearchInput, NormalizedJob, ParsedResume, RankedJob } from "@/types";
 import { isWorldwideFilter } from "@/lib/location";
+import { getCountryProviderWeight } from "@/lib/country-provider-weighting";
+import { matchesSearchQuery } from "@/lib/search-query";
 import { dedupe } from "@/lib/utils";
 
 function normalize(text: string) {
@@ -86,15 +88,18 @@ export function rankJobs(
       const titleCoverage = titleTokens.filter((token) => title.includes(token)).length;
       const seniority = getSeniority(job.title);
 
-      if (title.includes(desiredTitle)) {
+      if (desiredTitle && matchesSearchQuery(job.title, desiredTitle) && title.includes(desiredTitle)) {
         score += 26;
         reasons.push("Strong title match");
+      } else if (desiredTitle && matchesSearchQuery(job.title, desiredTitle)) {
+        score += 18;
+        reasons.push("Strong role match");
       } else if (titleCoverage >= Math.max(1, Math.ceil(titleTokens.length / 2))) {
         score += 14;
         reasons.push("Partial title match");
       }
 
-      if (desiredKeyword && keywordHaystack.includes(desiredKeyword)) {
+      if (desiredKeyword && matchesSearchQuery(keywordHaystack, desiredKeyword)) {
         score += 10;
         reasons.push(`Keyword match: ${search.keyword}`);
       }
@@ -102,6 +107,19 @@ export function rankJobs(
       if (search.company && job.company.toLowerCase().includes(search.company.toLowerCase())) {
         score += 8;
         reasons.push(`Company preference matched: ${search.company}`);
+      }
+
+      const providerWeight = getCountryProviderWeight(search, job);
+      if (providerWeight !== 0) {
+        score += providerWeight;
+
+        if (providerWeight >= 12) {
+          reasons.push(`Source is strong for ${search.country ?? "this search"}`);
+        } else if (providerWeight >= 6) {
+          reasons.push("Source is a reasonable fit for this market");
+        } else if (providerWeight <= -6) {
+          reasons.push("Source looks less local for this search");
+        }
       }
 
       const skillMatches = uniqueMatches(resumeSkills, jobKeywords);

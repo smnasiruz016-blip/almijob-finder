@@ -1,5 +1,8 @@
+import { log } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { getSuggestedQueryReplacement } from "@/lib/search-query";
 import { fetchFromAdapters } from "@/server/adapters/provider-registry";
+import { searchEmployerVacancies } from "@/server/services/company-vacancies";
 import { rankJobs } from "@/server/services/ranking";
 import type { JobSearchInput, NormalizedJob, ParsedResume, SearchInsights } from "@/types";
 
@@ -116,7 +119,8 @@ export function dedupeJobs<T extends NormalizedJob>(jobs: T[]) {
 }
 
 function buildSearchInsights<T extends { company: string; remoteStatus?: string; salaryMin?: number; salaryMax?: number; sourceType?: string }>(
-  jobs: T[]
+  jobs: T[],
+  input: JobSearchInput
 ): SearchInsights {
   const companyCounts = jobs.reduce<Record<string, number>>((acc, job) => {
     acc[job.company] = (acc[job.company] ?? 0) + 1;
@@ -131,7 +135,8 @@ function buildSearchInsights<T extends { company: string; remoteStatus?: string;
     topCompanies: Object.entries(companyCounts)
       .sort((left, right) => right[1] - left[1])
       .slice(0, 4)
-      .map(([company]) => company)
+      .map(([company]) => company),
+    suggestedQueryReplacement: getSuggestedQueryReplacement(input.desiredTitle) ?? getSuggestedQueryReplacement(input.keyword)
   };
 }
 
@@ -143,9 +148,19 @@ export async function executeJobSearch(input: JobSearchInput, resume?: ParsedRes
   };
 
   const { jobs, usedFallback, sources, providerStatuses } = await fetchFromAdapters(normalizedInput);
-  const results = dedupeJobs(jobs);
+  const employerJobs = await searchEmployerVacancies(normalizedInput);
+  const employerStatus = {
+    source: "Almiworld Employers",
+    sourceType: "live" as const,
+    status: employerJobs.length ? ("success" as const) : ("no_matches" as const),
+    results: employerJobs.length,
+    message: employerJobs.length
+      ? "Direct employer vacancies matched this search."
+      : "No direct employer vacancies matched this search yet."
+  };
+  const results = dedupeJobs([...jobs, ...employerJobs]);
   const ranked = rankJobs(results, normalizedInput, resume);
-  const insights = buildSearchInsights(ranked);
+  const insights = buildSearchInsights(ranked, normalizedInput);
   const quality = {
     averageMatchScore: ranked.length ? Math.round(ranked.reduce((sum, job) => sum + job.matchScore, 0) / ranked.length) : 0,
     topMatchScore: ranked[0]?.matchScore ?? 0,
@@ -161,74 +176,86 @@ export async function executeJobSearch(input: JobSearchInput, resume?: ParsedRes
     results: ranked,
     meta: {
       usedFallback,
-      sources,
+      sources: [...new Set([...sources, ...employerJobs.map((job) => job.source)])],
       sourceBreakdown,
       insights,
       quality,
-      providerStatuses
+      providerStatuses: [...providerStatuses, employerStatus]
     }
   };
 }
 
 export async function runJobSearch(userId: string, input: JobSearchInput, resume?: ParsedResume | null) {
   const { normalizedInput, results: ranked, meta } = await executeJobSearch(input, resume);
+  let searchId: string | null = null;
 
-  const search = await prisma.jobSearch.create({
-    data: {
+  try {
+    const search = await prisma.jobSearch.create({
+      data: {
+        userId,
+        desiredTitle: normalizedInput.desiredTitle,
+        keyword: normalizedInput.keyword,
+        company: normalizedInput.company,
+        country: normalizedInput.country ?? "Worldwide",
+        state: normalizedInput.state,
+        city: normalizedInput.city,
+        remoteMode: normalizedInput.remoteMode,
+        employmentType: normalizedInput.employmentType,
+        postedWithinDays: normalizedInput.postedWithinDays,
+        salaryMin: normalizedInput.salaryMin,
+        salaryMax: normalizedInput.salaryMax,
+        latestResults: ranked
+      }
+    });
+    searchId = search.id;
+
+    await prisma.searchHistory.create({
+      data: {
+        userId,
+        searchId: search.id,
+        snapshot: normalizedInput,
+        resultsCount: ranked.length
+      }
+    });
+
+    for (const job of ranked) {
+      await prisma.jobResultCache.upsert({
+        where: {
+          externalJobId_source: {
+            externalJobId: job.externalJobId,
+            source: job.source
+          }
+        },
+        update: {
+          payload: job,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          postedDate: job.postedDate ? new Date(job.postedDate) : null
+        },
+        create: {
+          externalJobId: job.externalJobId,
+          source: job.source,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          postedDate: job.postedDate ? new Date(job.postedDate) : null,
+          payload: job
+        }
+      });
+    }
+  } catch (error) {
+    log("error", "Job search persistence failed", {
       userId,
       desiredTitle: normalizedInput.desiredTitle,
-      keyword: normalizedInput.keyword,
-      company: normalizedInput.company,
-      country: normalizedInput.country ?? "Worldwide",
-      state: normalizedInput.state,
-      city: normalizedInput.city,
-      remoteMode: normalizedInput.remoteMode,
-      employmentType: normalizedInput.employmentType,
-      postedWithinDays: normalizedInput.postedWithinDays,
-      salaryMin: normalizedInput.salaryMin,
-      salaryMax: normalizedInput.salaryMax,
-      latestResults: ranked
-    }
-  });
-
-  await prisma.searchHistory.create({
-    data: {
-      userId,
-      searchId: search.id,
-      snapshot: normalizedInput,
-      resultsCount: ranked.length
-    }
-  });
-
-  for (const job of ranked) {
-    await prisma.jobResultCache.upsert({
-      where: {
-        externalJobId_source: {
-          externalJobId: job.externalJobId,
-          source: job.source
-        }
-      },
-      update: {
-        payload: job,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        postedDate: job.postedDate ? new Date(job.postedDate) : null
-      },
-      create: {
-        externalJobId: job.externalJobId,
-        source: job.source,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        postedDate: job.postedDate ? new Date(job.postedDate) : null,
-        payload: job
-      }
+      country: normalizedInput.country,
+      resultCount: ranked.length,
+      error: error instanceof Error ? error.message : "Unknown error"
     });
   }
 
   return {
-    searchId: search.id,
+    searchId,
     results: ranked,
     meta
   };

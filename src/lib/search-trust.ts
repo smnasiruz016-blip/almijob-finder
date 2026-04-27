@@ -23,13 +23,20 @@ export function buildResultsSummary({
   const totalJobs = results.length;
   const strongMatches = results.filter((job) => job.matchScore >= 80).length;
   const hasLiveSuccess = statuses.some((provider) => provider.sourceType === "live" && provider.status === "success");
+  const hasLiveNoMatches = statuses.some((provider) => provider.sourceType === "live" && provider.status === "no_matches");
   const hasLiveOnlyErrors = statuses.some((provider) => provider.sourceType === "live" && provider.status === "error") && !hasLiveSuccess;
+  const hasMockStandby = statuses.some(
+    (provider) =>
+      provider.sourceType === "mock" &&
+      provider.status === "disabled" &&
+      provider.message?.toLowerCase().includes("turned off")
+  );
 
   let providerLabel = "Provider source will appear after your next search.";
   let providerTone: ResultsSummary["providerTone"] = "idle";
 
   if (usedFallback) {
-    providerLabel = "Fallback providers kept results available for this search.";
+    providerLabel = "Sample fallback kept results visible for this internal search.";
     providerTone = "fallback";
   } else if (hasLiveSuccess) {
     providerLabel = "Live providers supplied this result set.";
@@ -37,8 +44,10 @@ export function buildResultsSummary({
   } else if (hasLiveOnlyErrors) {
     providerLabel = "Live providers are temporarily unavailable right now.";
     providerTone = "unavailable";
-  } else if (statuses.some((provider) => provider.sourceType === "live" && provider.status === "no_matches")) {
-    providerLabel = "Live providers are active, but this search is still narrow.";
+  } else if (hasLiveNoMatches) {
+    providerLabel = hasMockStandby
+      ? "Live providers are active, but no live jobs matched this search yet."
+      : "Live providers are active, but this search is still narrow.";
     providerTone = "live";
   }
 

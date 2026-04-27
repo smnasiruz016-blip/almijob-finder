@@ -5,10 +5,14 @@ export type ProviderRuntimeConfig = {
   remotiveEnabled: boolean;
   remotiveApiUrl: string;
   remotiveRevalidateSeconds: number;
+  joobleEnabled: boolean;
+  joobleApiUrl: string;
+  joobleApiKey?: string;
   adzunaEnabled: boolean;
   adzunaApiUrl: string;
   adzunaAppId?: string;
   adzunaAppKey?: string;
+  mockFallbackEnabled: boolean;
 };
 
 function parseBoolean(value: string | undefined, defaultValue: boolean) {
@@ -32,9 +36,13 @@ export function getProviderRuntimeConfig(): ProviderRuntimeConfig {
     remotiveEnabled: parseBoolean(process.env.REMOTIVE_ENABLED, true),
     remotiveApiUrl: process.env.REMOTIVE_API_URL ?? "https://remotive.com/api/remote-jobs",
     remotiveRevalidateSeconds: parseNumber(process.env.REMOTIVE_REVALIDATE_SECONDS, 21600),
+    joobleEnabled: parseBoolean(process.env.JOOBLE_ENABLED, true),
+    joobleApiUrl: process.env.JOOBLE_API_URL ?? "https://jooble.org/api",
+    joobleApiKey: process.env.JOOBLE_API_KEY || undefined,
     adzunaEnabled: parseBoolean(process.env.ADZUNA_ENABLED, true),
     adzunaApiUrl: process.env.ADZUNA_API_URL ?? "https://api.adzuna.com/v1/api/jobs",
     adzunaAppId: process.env.ADZUNA_APP_ID || undefined,
-    adzunaAppKey: process.env.ADZUNA_APP_KEY || undefined
+    adzunaAppKey: process.env.ADZUNA_APP_KEY || undefined,
+    mockFallbackEnabled: parseBoolean(process.env.MOCK_FALLBACK_ENABLED, process.env.NODE_ENV !== "production")
   };
 }

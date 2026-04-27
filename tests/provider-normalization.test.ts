@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAdzunaJob, normalizeRemoteOkJob, normalizeRemotiveJob } from "@/server/adapters/provider-registry";
+import { normalizeAdzunaJob, normalizeJoobleJob, normalizeRemoteOkJob, normalizeRemotiveJob } from "@/server/adapters/provider-registry";
 import type { JobSearchInput } from "@/types";
 
 describe("provider normalization", () => {
@@ -105,5 +105,47 @@ describe("provider normalization", () => {
     );
     expect(job.descriptionSnippet).toContain("Build APIs and distributed systems");
     expect(job.keywords).toContain("Python");
+  });
+
+  it("normalizes Jooble jobs into the internal format with attribution metadata", () => {
+    const input: JobSearchInput = {
+      desiredTitle: "Nurse",
+      country: "Iceland",
+      city: "Reykjavik"
+    };
+
+    const job = normalizeJoobleJob(
+      {
+        id: "jooble-1",
+        title: "Staff Nurse",
+        company: "City Health",
+        location: "Reykjavik, Iceland",
+        link: "https://example.com/jooble/1",
+        salary: "$4500",
+        type: "full_time",
+        snippet: "Provide clinical support in Reykjavik.",
+        source: "Jooble",
+        updated: "2026-04-24T00:00:00.000Z"
+      },
+      input
+    );
+
+    expect(job).toEqual(
+      expect.objectContaining({
+        externalJobId: "jooble-1",
+        source: "Jooble",
+        sourceType: "live",
+        title: "Staff Nurse",
+        company: "City Health",
+        location: "Reykjavik, Iceland",
+        salary: "$4500",
+        jobType: "FULL_TIME",
+        providerMetadata: {
+          attributionLabel: "Source: Jooble",
+          attributionUrl: "https://example.com/jooble/1"
+        }
+      })
+    );
+    expect(job.descriptionSnippet).toContain("Provide clinical support in Reykjavik.");
   });
 });

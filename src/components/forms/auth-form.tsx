@@ -35,28 +35,21 @@ export function AuthForm({ mode }: AuthFormProps) {
             password: formData.get("password")
           };
 
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-      const data = await response.json();
+    const data = await response.json();
+    setLoading(false);
 
-      if (!response.ok) {
-        setError(data.error ?? "Something went wrong. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      // Refresh server state then navigate to dashboard
-      router.refresh();
-      router.push("/dashboard");
-    } catch {
-      setError("A network error occurred. Please check your connection and try again.");
-      setLoading(false);
+    if (!response.ok) {
+      setError(data.error ?? "Something went wrong.");
+      return;
     }
+
+    router.replace("/dashboard");
   }
 
   return (
@@ -93,26 +86,14 @@ export function AuthForm({ mode }: AuthFormProps) {
 
       <div className="mt-6 space-y-4">
         {mode === "signup" && <Input name="name" placeholder="Full name" required />}
-        <Input name="email" type="email" placeholder="Email address" autoComplete="email" required />
-        <Input name="password" type="password" placeholder="Password" autoComplete={mode === "login" ? "current-password" : "new-password"} required />
+        <Input name="email" type="email" placeholder="Email address" required />
+        <Input name="password" type="password" placeholder="Password" required />
       </div>
 
-      {error && (
-        <div className="mt-4 rounded-2xl bg-red-50 px-4 py-3">
-          <p className="text-sm font-medium text-red-700">{error}</p>
-        </div>
-      )}
+      {error && <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       <Button type="submit" disabled={loading} className="mt-6 w-full">
-        {loading ? (
-          <span className="flex items-center gap-2">
-            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            {mode === "login" ? "Logging in..." : "Creating account..."}
-          </span>
-        ) : mode === "login" ? "Log in" : "Create account"}
+        {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
       </Button>
       <p className="mt-4 text-center text-sm text-slate-500">
         {mode === "login" ? "Need an account?" : "Already have an account?"}{" "}

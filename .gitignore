@@ -1,0 +1,14 @@
+.next
+node_modules
+.env
+.env.local
+coverage
+dist
+tmp
+storage/uploads
+prisma/dev.db
+*.log
+
+zip-staging
+.vercel
+almijob-finder-clean-jobfinder.zip

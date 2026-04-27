@@ -17,7 +17,7 @@ describe("buildSearchFeedbackState", () => {
   it("returns a provider-unavailable empty state when live providers are down", () => {
     const state = buildSearchFeedbackState({
       type: "empty",
-      message: "The live job source is unavailable right now, and fallback providers could not find a close match."
+      message: "Live job providers are temporarily unavailable right now. Try again shortly or broaden your search."
     });
 
     expect(state.title).toBe("Live providers are temporarily unavailable");

@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserRole {
@@ -37,6 +38,18 @@ enum AlertFrequency {
   WEEKLY
 }
 
+enum CompanyUserRole {
+  OWNER
+  ADMIN
+  RECRUITER
+}
+
+enum VacancyStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
 model User {
   id            String          @id @default(cuid())
   name          String
@@ -50,6 +63,7 @@ model User {
   searchHistory SearchHistory[]
   savedJobs     SavedJob[]
   savedSearches SavedSearch[]
+  companyMemberships CompanyUser[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -66,10 +80,10 @@ model Session {
 model Resume {
   id                String   @id @default(cuid())
   userId            String
-  originalFilename  String
-  storagePath       String
-  mimeType          String
-  extractedText     String   @db.Text
+  originalFilename  String?
+  storagePath       String?
+  mimeType          String?
+  extractedText     String?  @db.Text
   parsedName        String?
   parsedEmail       String?
   parsedPhone       String?
@@ -152,4 +166,73 @@ model JobResultCache {
   createdAt     DateTime @default(now())
 
   @@unique([externalJobId, source])
+}
+
+model Company {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  website     String?
+  logoUrl     String?
+  description String?       @db.Text
+  country     String
+  state       String?
+  city        String?
+  verified    Boolean       @default(false)
+  users       CompanyUser[]
+  vacancies   Vacancy[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model CompanyUser {
+  id        String          @id @default(cuid())
+  companyId String
+  userId    String          @unique
+  role      CompanyUserRole @default(RECRUITER)
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+
+  @@unique([companyId, userId])
+}
+
+model Vacancy {
+  id             String           @id @default(cuid())
+  companyId      String
+  title          String
+  description    String           @db.Text
+  country        String
+  state          String?
+  city           String?
+  remoteMode     RemoteMode?
+  employmentType EmploymentType?
+  salaryMin      Int?
+  salaryMax      Int?
+  applyUrl       String?
+  status         VacancyStatus    @default(DRAFT)
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model JobSourceDirectory {
+  id              String   @id @default(cuid())
+  region          String
+  country         String
+  website         String
+  url             String
+  category        String
+  notes           String?  @db.Text
+  sourcePriority  Int      @default(100)
+  hasApi          Boolean  @default(false)
+  isAggregator    Boolean  @default(false)
+  isEmployerBoard Boolean  @default(false)
+  isTrusted       Boolean  @default(true)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([country, website])
+  @@index([country, active, sourcePriority])
 }

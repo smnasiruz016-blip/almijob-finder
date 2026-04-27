@@ -1,25 +1,29 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { Activity, BellRing, Bookmark, BriefcaseBusiness, Globe2, Search, Sparkles, Star, UploadCloud } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, BellRing, Bookmark, BriefcaseBusiness, Building2, ExternalLink, Globe2, Search, Sparkles, Star, UploadCloud } from "lucide-react";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { CountryHiringPanel } from "@/components/dashboard/country-hiring-panel";
 import { JobCard } from "@/components/dashboard/job-card";
 import { MatchScore } from "@/components/dashboard/match-score";
 import { PlanCard } from "@/components/dashboard/plan-card";
 import { ResultSkeleton } from "@/components/dashboard/result-skeleton";
 import { buildSavedSearchSectionCopy, buildSearchFeedbackState, buildUploadErrorState } from "@/lib/dashboard-copy";
 import { buildAlertOverview, buildSetupChecklist } from "@/lib/dashboard-insights";
+import { collectAdvertisedSkills, getRoleProfile, getRoleSuggestions, getSuggestedSkillOptions, ROLE_OPTIONS } from "@/lib/job-taxonomy";
 import { buildProfileInsights } from "@/lib/profile-insights";
 import { buildResumeSuggestions } from "@/lib/resume-suggestions";
+import { shouldShowTrustedSourcePanel } from "@/lib/source-guidance";
 import { buildResultsSummary, buildUsageSupportCopy } from "@/lib/search-trust";
 import { COUNTRY_OPTIONS, getCityOptions, getRegionOptions } from "@/lib/location-data";
+import { getTrustedSourcesForCountry } from "@/lib/source-directory";
 import { canUseAlerts, canUseResumeInsights } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrencyRange } from "@/lib/utils";
-import type { ParsedResume, ProviderStatus, RankedJob, SearchInsights, SearchUsageSnapshot, SessionUser } from "@/types";
+import type { CountryBrowseJob, CountryHiringHighlights, CountryRoleSuggestion, EmployerInventoryOverview, JobSourceLink, ParsedResume, ProviderStatus, RankedJob, SearchInsights, SearchUsageSnapshot, SessionUser } from "@/types";
 
 type HistorySnapshot = {
   desiredTitle: string;
@@ -39,6 +43,13 @@ type DashboardShellProps = {
   user: SessionUser;
   resume: ParsedResume | null;
   usage: SearchUsageSnapshot;
+  employerInventory: EmployerInventoryOverview;
+  countryHighlights: CountryHiringHighlights;
+  trustedCountrySources: JobSourceLink[];
+  countrySampleJobs: CountryBrowseJob[];
+  countryRoleSuggestions: CountryRoleSuggestion[];
+  initialFormState: SearchFormState;
+  initialResults: RankedJob[];
   initialSavedJobs: Array<{
     id: string;
     title: string;
@@ -200,6 +211,24 @@ function getProviderLabel(status: ProviderStatus["status"]) {
   return "Standby";
 }
 
+function getSourceBadges(source: JobSourceLink) {
+  const badges = [source.category];
+
+  if (source.hasApi) {
+    badges.push("API");
+  }
+
+  if (source.isEmployerBoard) {
+    badges.push("Employer board");
+  } else if (source.isAggregator) {
+    badges.push("Aggregator");
+  } else if (source.isTrusted) {
+    badges.push("Trusted");
+  }
+
+  return badges.slice(0, 3);
+}
+
 function getAlertFrequencyLabel(frequency: string) {
   return frequency === "WEEKLY" ? "Weekly" : "Daily";
 }
@@ -222,42 +251,57 @@ export function DashboardShell({
   user,
   resume,
   usage,
+  employerInventory,
+  countryHighlights,
+  trustedCountrySources,
+  countrySampleJobs,
+  countryRoleSuggestions,
+  initialFormState,
+  initialResults,
   initialSavedJobs,
   initialSavedSearches,
   initialHistory
 }: DashboardShellProps) {
   const [resumeSnapshot, setResumeSnapshot] = useState(resume);
-  const [results, setResults] = useState<RankedJob[]>([]);
+  const [results, setResults] = useState<RankedJob[]>(initialResults);
   const [savedJobs, setSavedJobs] = useState(initialSavedJobs);
   const [savedSearches, setSavedSearches] = useState(initialSavedSearches);
   const [history, setHistory] = useState(initialHistory);
   const [lastSearchPayload, setLastSearchPayload] = useState<Record<string, FormDataEntryValue>>({});
   const [view, setView] = useState<"cards" | "table">("cards");
   const [sortBy, setSortBy] = useState<"best-match" | "newest" | "salary">("best-match");
-  const [selectedJob, setSelectedJob] = useState<RankedJob | null>(null);
+  const [selectedJob, setSelectedJob] = useState<RankedJob | null>(initialResults[0] ?? null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<SearchStatus>({ type: "idle" });
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({ type: "idle" });
   const [searchUsage, setSearchUsage] = useState<SearchUsageSnapshot>(usage);
   const [saveSearchStatus, setSaveSearchStatus] = useState<InlineStatus>({ type: "idle" });
   const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null);
-  const [formState, setFormState] = useState<SearchFormState>({
-    desiredTitle: "",
-    keyword: "",
-    company: "",
-    country: "Worldwide",
-    state: "",
-    city: "",
-    remoteMode: "",
-    employmentType: "",
-    postedWithinDays: "",
-    salaryMin: "",
-    salaryMax: ""
-  });
+  const [trustedSources, setTrustedSources] = useState<JobSourceLink[]>([]);
+  const [formState, setFormState] = useState<SearchFormState>(initialFormState);
   const alertsEnabledOnPlan = canUseAlerts(user.subscriptionTier);
   const resumeInsightsEnabledOnPlan = canUseResumeInsights(user.subscriptionTier);
+  const resultsSectionRef = useRef<HTMLElement | null>(null);
 
   const availableRegions = useMemo(() => getRegionOptions(formState.country), [formState.country]);
   const availableCities = useMemo(() => getCityOptions(formState.country, formState.state), [formState.country, formState.state]);
+  const useRegionSelect = formState.country !== "Worldwide" && availableRegions.length > 0;
+  const useCitySelect = formState.country !== "Worldwide" && availableCities.length > 0;
+  const citySelectDisabled = formState.country === "Worldwide" || (useRegionSelect && !formState.state);
+  const cityPlaceholder = formState.country === "Worldwide"
+    ? "No city needed"
+    : !formState.state && useRegionSelect
+      ? "Select a region first"
+      : useCitySelect
+        ? "Select city"
+        : "Type a city if you want";
+  const cityHelpText = formState.country === "Worldwide"
+    ? "Worldwide search does not need a city filter."
+    : !formState.state && useRegionSelect
+      ? "Choose a state or region first to unlock city options."
+      : !useCitySelect
+        ? "You can type a city manually when we do not have mapped city options yet."
+        : "Optional: narrow your results further by city.";
 
   const sortedResults = useMemo(() => {
     const next = [...results];
@@ -273,7 +317,6 @@ export function DashboardShell({
     return next.sort((a, b) => b.matchScore - a.matchScore);
   }, [results, sortBy]);
 
-  const resumeSuggestions = useMemo(() => buildResumeSuggestions(resumeSnapshot, selectedJob), [resumeSnapshot, selectedJob]);
   const profileInsights = useMemo(() => buildProfileInsights(resumeSnapshot), [resumeSnapshot]);
   const alertOverview = useMemo(() => buildAlertOverview(savedSearches, alertsEnabledOnPlan), [savedSearches, alertsEnabledOnPlan]);
   const setupChecklist = useMemo(
@@ -324,9 +367,164 @@ export function DashboardShell({
   const searchFeedbackState =
     searchStatus.type === "error" || searchStatus.type === "empty" ? buildSearchFeedbackState(searchStatus) : null;
   const uploadErrorState = uploadStatus.type === "error" ? buildUploadErrorState(uploadStatus) : null;
+  const selectedRoleProfile = useMemo(() => getRoleProfile(formState.desiredTitle), [formState.desiredTitle]);
+  const roleSuggestions = useMemo(() => getRoleSuggestions(formState.desiredTitle), [formState.desiredTitle]);
+  const advertisedSkills = useMemo(() => collectAdvertisedSkills(results), [results]);
+  const suggestedSkills = useMemo(() => getSuggestedSkillOptions(formState.desiredTitle, results), [formState.desiredTitle, results]);
+  const liveCategoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const job of results) {
+      const category = getRoleProfile(job.title)?.category ?? "Other";
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((left, right) => right.count - left.count || left.category.localeCompare(right.category))
+      .slice(0, 6);
+  }, [results]);
+  const filteredResults = useMemo(() => {
+    if (!selectedCategory) {
+      return sortedResults;
+    }
+
+    return sortedResults.filter((job) => (getRoleProfile(job.title)?.category ?? "Other") === selectedCategory);
+  }, [selectedCategory, sortedResults]);
+  const visibleSelectedJob = useMemo(() => {
+    if (filteredResults.length === 0) {
+      return null;
+    }
+
+    if (!selectedJob) {
+      return filteredResults[0] ?? null;
+    }
+
+    return (
+      filteredResults.find((job) => `${job.source}-${job.externalJobId}` === `${selectedJob.source}-${selectedJob.externalJobId}`) ??
+      filteredResults[0] ??
+      null
+    );
+  }, [filteredResults, selectedJob]);
+  const resumeSuggestions = useMemo(() => buildResumeSuggestions(resumeSnapshot, visibleSelectedJob), [resumeSnapshot, visibleSelectedJob]);
+  const showTrustedSourcePanel = useMemo(
+    () =>
+      shouldShowTrustedSourcePanel({
+        country: formState.country,
+        resultsCount: filteredResults.length,
+        averageMatchScore: searchMeta?.quality?.averageMatchScore,
+        providerStatuses: searchMeta?.providerStatuses,
+        selectedCategory
+      }),
+    [filteredResults.length, formState.country, searchMeta?.providerStatuses, searchMeta?.quality?.averageMatchScore, selectedCategory]
+  );
+
+  useEffect(() => {
+    if (!showTrustedSourcePanel) {
+      return;
+    }
+
+    let cancelled = false;
+    const fallbackSources = getTrustedSourcesForCountry(formState.country);
+
+    async function loadTrustedSources() {
+      try {
+        const response = await fetch(`/api/source-directory?country=${encodeURIComponent(formState.country)}`);
+        if (!response.ok) {
+          throw new Error("SOURCE_DIRECTORY_REQUEST_FAILED");
+        }
+
+        const data = (await response.json()) as { sources?: JobSourceLink[] };
+        if (!cancelled) {
+          setTrustedSources(data.sources?.length ? data.sources : fallbackSources);
+        }
+      } catch {
+        if (!cancelled) {
+          setTrustedSources(fallbackSources);
+        }
+      }
+    }
+
+    void loadTrustedSources();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formState.country, showTrustedSourcePanel]);
+
+  const trustedSourcePanel =
+    showTrustedSourcePanel && trustedSources.length > 0 ? (
+      <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-teal-50 p-3 text-teal-700">
+            <Globe2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {filteredResults.length === 0
+                ? `Trusted job websites for ${formState.country === "Worldwide" ? "worldwide search" : formState.country}`
+                : `Expand this search with trusted job websites in ${formState.country === "Worldwide" ? "global markets" : formState.country}`}
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
+              {filteredResults.length === 0
+                ? "Live provider coverage is still thin for this search. These trusted external job websites are a good next step while we keep expanding worldwide provider coverage."
+                : "You have some live results, but this search still looks thin or low-confidence. These trusted job sites are a good next step for deeper local coverage."}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {trustedSources.map((source) => (
+            <a
+              key={`${formState.country}-${source.name}`}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-[1.25rem] border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-teal-200 hover:bg-white hover:shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900">{source.name}</p>
+                  {source.region && source.region !== "Worldwide" && (
+                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{source.region}</p>
+                  )}
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {getSourceBadges(source).map((badge) => (
+                    <span
+                      key={`${source.name}-${badge}`}
+                      className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 ring-1 ring-slate-200"
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{source.note}</p>
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-teal-700">
+                Open source
+                <ExternalLink className="h-4 w-4" />
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    ) : null;
 
   function updateForm<K extends keyof SearchFormState>(key: K, value: SearchFormState[K]) {
     setFormState((current) => ({ ...current, [key]: value }));
+  }
+
+  function applySuggestedSkill(skill: string) {
+    const currentKeywords = formState.keyword
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (currentKeywords.some((item) => item.toLowerCase() === skill.toLowerCase())) {
+      return;
+    }
+
+    updateForm("keyword", [...currentKeywords, skill].join(", "));
   }
 
   function applyPreset(values: Partial<SearchFormState>) {
@@ -339,12 +537,24 @@ export function DashboardShell({
     }));
   }
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSearchStatus({ type: "loading", message: "Searching live and fallback job sources..." });
+  function handleCategoryFilter(category: string) {
+    const nextCategory = selectedCategory === category ? null : category;
+    const nextResults = nextCategory
+      ? sortedResults.filter((job) => (getRoleProfile(job.title)?.category ?? "Other") === nextCategory)
+      : sortedResults;
+
+    setSelectedCategory(nextCategory);
+    setView("cards");
+    setSelectedJob(nextResults[0] ?? null);
+
+    window.requestAnimationFrame(() => {
+      resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  async function runSearch(payload: Record<string, string>, options?: { scrollToResults?: boolean }) {
+    setSearchStatus({ type: "loading", message: "Searching live job providers..." });
     setSaveSearchStatus({ type: "idle" });
-    const formData = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(formData.entries());
     setLastSearchPayload(payload);
 
     const response = await fetch("/api/jobs/search", {
@@ -361,6 +571,7 @@ export function DashboardShell({
       }
       setResults([]);
       setSelectedJob(null);
+      setSelectedCategory(null);
       setSearchMeta(null);
       setSearchStatus({
         type: "error",
@@ -370,44 +581,113 @@ export function DashboardShell({
       return;
     }
 
-    setSearchUsage(data.usage);
+    if (data.usage) {
+      setSearchUsage(data.usage);
+    }
     setResults(data.results);
     setSelectedJob(data.results[0] ?? null);
+    setSelectedCategory(null);
     setSearchMeta(data.meta ?? null);
-    setHistory((current) => [
-      {
-        id: data.searchId,
-        createdAt: new Date().toISOString(),
-        resultsCount: data.results.length,
-        desiredTitle: String(payload.desiredTitle ?? ""),
-        keyword: String(payload.keyword ?? ""),
-        country: String(payload.country ?? "Worldwide") || "Worldwide",
-        snapshot: createSnapshotFromForm(formState)
-      },
-      ...current.filter((entry) => entry.id !== data.searchId)
-    ].slice(0, 6));
+    if (data.searchId) {
+      setHistory((current) => [
+        {
+          id: data.searchId,
+          createdAt: new Date().toISOString(),
+          resultsCount: data.results.length,
+          desiredTitle: String(payload.desiredTitle ?? ""),
+          keyword: String(payload.keyword ?? ""),
+          country: String(payload.country ?? "Worldwide") || "Worldwide",
+          snapshot: createSnapshotFromForm(formState)
+        },
+        ...current.filter((entry) => entry.id !== data.searchId)
+      ].slice(0, 6));
+    }
 
     if (data.results.length === 0) {
-      const liveUnavailable = (data.meta?.providerStatuses ?? []).some((provider: ProviderStatus) => provider.sourceType === "live" && provider.status === "error");
+      const liveUnavailable = (data.meta?.providerStatuses ?? []).some(
+        (provider: ProviderStatus) => provider.sourceType === "live" && provider.status === "error"
+      );
+      const liveNoMatches = (data.meta?.providerStatuses ?? []).some(
+        (provider: ProviderStatus) => provider.sourceType === "live" && provider.status === "no_matches"
+      );
+      const suggestedQueryReplacement = data.meta?.insights?.suggestedQueryReplacement as string | null | undefined;
+      const queryHint =
+        suggestedQueryReplacement && suggestedQueryReplacement.toLowerCase() !== formState.desiredTitle.trim().toLowerCase()
+          ? ` Try "${suggestedQueryReplacement}" as the role title next.`
+          : "";
       setSearchStatus({
         type: "empty",
         message: liveUnavailable
-          ? "The live job source is unavailable right now, and fallback providers could not find a close match. Try again shortly or broaden your search."
-          : "No jobs found - try a broader search, add a keyword, or remove a strict location filter."
+          ? "Live job providers are temporarily unavailable right now. Try again shortly or broaden your search."
+          : liveNoMatches
+            ? `No live jobs matched this search yet. Try a broader title, country, or remote search.${queryHint}`
+            : "No jobs found - try a broader search, add a keyword, or remove a strict location filter."
       });
+      if (options?.scrollToResults !== false) {
+        window.requestAnimationFrame(() => {
+          resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
       return;
     }
 
-    const fallbackNote = data.meta?.usedFallback ? " Live source unavailable, so mock fallback data was used." : "";
+    const fallbackNote = data.meta?.usedFallback ? " Sample fallback data was used for this internal search." : "";
     const highFitNote = data.meta?.quality?.highFitCount ? ` ${data.meta.quality.highFitCount} high-fit roles surfaced.` : "";
     const liveNoMatchNote =
       !data.meta?.usedFallback &&
       (data.meta?.providerStatuses ?? []).some((provider: ProviderStatus) => provider.sourceType === "live" && provider.status === "no_matches")
-        ? " Live providers are available, but this search is still narrow."
+        ? " Live providers are active, but this search is still narrow."
         : "";
     setSearchStatus({
       type: "success",
       message: `Found ${data.results.length} jobs from ${data.meta?.sources?.join(", ") ?? "available sources"}.${fallbackNote}${liveNoMatchNote}${highFitNote}`
+    });
+
+    if (options?.scrollToResults !== false) {
+      window.requestAnimationFrame(() => {
+        resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(
+      Array.from(formData.entries()).map(([key, value]) => [key, String(value)])
+    ) as Record<string, string>;
+    await runSearch(payload);
+  }
+
+  async function handleCountryRoleSearch(role: CountryRoleSuggestion) {
+    const nextFormState: SearchFormState = {
+      ...formState,
+      desiredTitle: role.desiredTitle,
+      keyword: role.keyword ?? "",
+      company: "",
+      country: countryHighlights.country,
+      state: "",
+      city: "",
+      remoteMode: "",
+      employmentType: "",
+      postedWithinDays: "",
+      salaryMin: "",
+      salaryMax: ""
+    };
+
+    setFormState(nextFormState);
+    await runSearch({
+      desiredTitle: nextFormState.desiredTitle,
+      keyword: nextFormState.keyword,
+      company: "",
+      country: nextFormState.country,
+      state: "",
+      city: "",
+      remoteMode: "",
+      employmentType: "",
+      postedWithinDays: "",
+      salaryMin: "",
+      salaryMax: ""
     });
   }
 
@@ -630,6 +910,46 @@ export function DashboardShell({
             </div>
           </div>
 
+          <div className="mt-4 rounded-[1.5rem] bg-white p-5 ring-1 ring-slate-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Available jobs by category</p>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  These counts come from your current live result set, not fixed examples.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                {results.length} total
+              </span>
+            </div>
+
+            {liveCategoryCounts.length > 0 ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {liveCategoryCounts.map((entry) => (
+                  <button
+                    key={entry.category}
+                    type="button"
+                    onClick={() => handleCategoryFilter(entry.category)}
+                    className={`rounded-[1.25rem] px-4 py-3 text-left transition ${
+                      selectedCategory === entry.category
+                        ? "bg-teal-50 ring-2 ring-teal-200"
+                        : "bg-slate-50 hover:bg-slate-100"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-900">{entry.category}</p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {entry.count} job{entry.count === 1 ? "" : "s"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-[1.25rem] bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-600">
+                Run a search to see real category counts such as Finance, Hospitality, Healthcare, and Technology.
+              </div>
+            )}
+          </div>
+
           <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
             <div className="rounded-[1.5rem] bg-white p-5 ring-1 ring-slate-200">
               <div className="flex items-start justify-between gap-4">
@@ -693,7 +1013,89 @@ export function DashboardShell({
           </div>
         </div>
 
-        <PlanCard usage={searchUsage} />
+        <div className="space-y-6">
+          <PlanCard usage={searchUsage} />
+
+          <CountryHiringPanel
+            title={`Jobs visitors can browse in ${countryHighlights.country}`}
+            description="This gives visitors and signed-in users a cleaner country entry point before they narrow into a specific role search."
+            highlights={countryHighlights}
+            trustedSources={trustedCountrySources}
+            sampleJobs={countrySampleJobs}
+            roleSuggestions={countryRoleSuggestions}
+            onRoleSelect={handleCountryRoleSearch}
+            compact
+          />
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900">Companies hiring on Almiworld</p>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  This is the direct-employer inventory layer. It will grow as companies start advertising vacancies inside Job Finder.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[1.25rem] bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Hiring companies</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-950">{employerInventory.totalHiringCompanies}</p>
+              </div>
+              <div className="rounded-[1.25rem] bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Open vacancies</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-950">{employerInventory.totalOpenVacancies}</p>
+              </div>
+            </div>
+
+            {employerInventory.featuredCompanies.length > 0 ? (
+              <div className="mt-5 grid gap-3">
+                {employerInventory.featuredCompanies.map((company) => (
+                  <div key={company.id} className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-slate-900">{company.name}</p>
+                          {company.verified ? (
+                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                              Verified
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {[company.city, company.country].filter(Boolean).join(", ")}{company.website ? " • direct employer" : ""}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                        {company.openRoles} open role{company.openRoles === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    {company.roleTitles.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {company.roleTitles.map((role) => (
+                          <span key={`${company.id}-${role}`} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                            {role}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-[1.25rem] bg-blue-50 px-4 py-4 text-sm leading-7 text-blue-900">
+                Direct employer vacancies are being prepared now. Once companies start posting inside Job Finder, this section will show verified hiring companies and their open roles here.
+              </div>
+            )}
+
+            <p className="mt-4 text-xs text-slate-500">
+              Inventory source: {employerInventory.source === "database" ? "live company database" : employerInventory.source === "fallback" ? "groundwork ready - waiting for first company posts" : "temporary fallback mode"}
+            </p>
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]" id="search">
@@ -719,9 +1121,134 @@ export function DashboardShell({
             </div>
           </div>
 
+          <div className="mt-5 rounded-[1.5rem] bg-white p-4 ring-1 ring-slate-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="font-semibold text-slate-900">Role and skill picker</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Choose a target role and add the skills companies are commonly asking for in that path.
+                </p>
+              </div>
+              {selectedRoleProfile ? (
+                <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800">
+                  {selectedRoleProfile.category}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <Select
+                value={selectedRoleProfile?.title ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value) {
+                    updateForm("desiredTitle", value);
+                  }
+                }}
+              >
+                <option value="">Choose a common role</option>
+                {ROLE_OPTIONS.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </Select>
+
+              <Select
+                value=""
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value) {
+                    applySuggestedSkill(value);
+                  }
+                }}
+                disabled={!suggestedSkills.length}
+              >
+                <option value="">{suggestedSkills.length ? "Add a role-based skill" : "Choose a role first"}</option>
+                {suggestedSkills.map((skill) => (
+                  <option key={skill} value={skill}>
+                    {skill}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            {selectedRoleProfile ? (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Popular skills for this role</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedRoleProfile.skills.map((skill) => (
+                    <button
+                      key={skill}
+                      type="button"
+                      onClick={() => applySuggestedSkill(skill)}
+                      className="rounded-full bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-teal-50 hover:text-teal-800"
+                    >
+                      {skill}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {advertisedSkills.length ? (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Skills seen in live openings</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {advertisedSkills.slice(0, 10).map((skill) => (
+                    <button
+                      key={skill}
+                      type="button"
+                      onClick={() => applySuggestedSkill(skill)}
+                      className="rounded-full bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 transition hover:bg-amber-100"
+                    >
+                      {skill}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  These come from the current live result set, so they reflect what employers are advertising right now.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <Input name="desiredTitle" placeholder="Type any job title (e.g. Nurse, Accountant, Driver...)" required value={formState.desiredTitle} onChange={(event) => updateForm("desiredTitle", event.target.value)} />
-            <Input name="keyword" placeholder="Keyword or skill (optional)" value={formState.keyword} onChange={(event) => updateForm("keyword", event.target.value)} />
+            <div className="space-y-2">
+              <Input
+                name="desiredTitle"
+                placeholder="Desired job title"
+                required
+                list="desired-role-options"
+                value={formState.desiredTitle}
+                onChange={(event) => updateForm("desiredTitle", event.target.value)}
+              />
+              <datalist id="desired-role-options">
+                {(roleSuggestions.length ? roleSuggestions : ROLE_OPTIONS.slice(0, 12)).map((role) => (
+                  <option key={role} value={role} />
+                ))}
+              </datalist>
+              <p className="px-1 text-xs text-slate-500">
+                Choose from common roles or type your own target job title. The role picker helps the app match your CV against the right opening family.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Input
+                name="keyword"
+                placeholder="Keyword or skill (optional)"
+                list="skill-options"
+                value={formState.keyword}
+                onChange={(event) => updateForm("keyword", event.target.value)}
+              />
+              <datalist id="skill-options">
+                {suggestedSkills.map((skill) => (
+                  <option key={skill} value={skill} />
+                ))}
+              </datalist>
+              <p className="px-1 text-xs text-slate-500">
+                Add one or more skills to help the app compare your CV against the role more accurately. Skills are suggested from role patterns and live company demand.
+              </p>
+            </div>
             <Input name="company" placeholder="Company (optional)" value={formState.company} onChange={(event) => updateForm("company", event.target.value)} />
             <Select
               name="country"
@@ -738,32 +1265,52 @@ export function DashboardShell({
                 </option>
               ))}
             </Select>
-            <Select
-              name="state"
-              value={formState.state}
-              onChange={(event) => {
-                updateForm("state", event.target.value);
-                updateForm("city", "");
-              }}
-              disabled={formState.country === "Worldwide"}
-            >
-              <option value="">{formState.country === "Worldwide" ? "No region needed" : "Select state / region"}</option>
-              {availableRegions.map((region) => (
-                <option key={region} value={region}>
-                  {region}
-                </option>
-              ))}
-            </Select>
-            <Select name="city" value={formState.city} onChange={(event) => updateForm("city", event.target.value)} disabled={formState.country === "Worldwide" || availableCities.length === 0}>
-              <option value="">
-                {formState.country === "Worldwide" ? "No city needed" : availableCities.length ? "Select city" : "City optional"}
-              </option>
-              {availableCities.map((city) => (
-                <option key={city} value={city}>
-                  {city}
-                </option>
-              ))}
-            </Select>
+              {useRegionSelect ? (
+                <Select
+                  name="state"
+                  value={formState.state}
+                  onChange={(event) => {
+                    updateForm("state", event.target.value);
+                    updateForm("city", "");
+                  }}
+                >
+                  <option value="">{formState.country === "Worldwide" ? "No region needed" : "Select state / region"}</option>
+                  {availableRegions.map((region) => (
+                    <option key={region} value={region}>
+                      {region}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  name="state"
+                  placeholder={formState.country === "Worldwide" ? "No region needed" : "State / region optional"}
+                  value={formState.state}
+                  onChange={(event) => updateForm("state", event.target.value)}
+                  disabled={formState.country === "Worldwide"}
+                />
+              )}
+              {useCitySelect ? (
+                <Select name="city" value={formState.city} onChange={(event) => updateForm("city", event.target.value)} disabled={citySelectDisabled}>
+                  <option value="">
+                    {cityPlaceholder}
+                  </option>
+                  {availableCities.map((city) => (
+                    <option key={city} value={city}>
+                      {city}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  name="city"
+                  placeholder={cityPlaceholder}
+                  value={formState.city}
+                  onChange={(event) => updateForm("city", event.target.value)}
+                  disabled={formState.country === "Worldwide"}
+                />
+              )}
+              <p className="px-1 text-xs text-slate-500">{cityHelpText}</p>
             <Select name="remoteMode" value={formState.remoteMode} onChange={(event) => updateForm("remoteMode", event.target.value)}>
               <option value="">Remote preference</option>
               <option value="REMOTE">Remote</option>
@@ -887,7 +1434,7 @@ export function DashboardShell({
         </form>
       </section>
 
-      <section className="grid gap-6 2xl:grid-cols-[1.08fr_0.92fr]">
+      <section ref={resultsSectionRef} className="grid gap-6 2xl:grid-cols-[1.08fr_0.92fr]">
         <div className="glass-panel rounded-[2rem] p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -911,14 +1458,31 @@ export function DashboardShell({
 
           <div className="mt-5">
             {sortedResults.length > 0 && (
-              <div className="mb-5 grid gap-3 md:grid-cols-4">
+              <div className="mb-5 space-y-3">
+                {selectedCategory ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-[1.25rem] bg-teal-50 px-4 py-3">
+                    <p className="text-sm font-medium text-teal-900">
+                      Filtering this result set by <span className="font-semibold">{selectedCategory}</span>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategory(null)}
+                      className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-teal-800 ring-1 ring-teal-200 transition hover:bg-teal-100"
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-[1.25rem] bg-white px-4 py-3 ring-1 ring-slate-200">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Jobs found</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950">{resultsSummary.totalJobs}</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">{filteredResults.length}</p>
                 </div>
                 <div className="rounded-[1.25rem] bg-white px-4 py-3 ring-1 ring-slate-200">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Strong matches</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950">{resultsSummary.strongMatches}</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">
+                    {filteredResults.filter((job) => job.matchScore >= 80).length}
+                  </p>
                 </div>
                 <div className="rounded-[1.25rem] bg-white px-4 py-3 ring-1 ring-slate-200">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Resume use</p>
@@ -938,6 +1502,7 @@ export function DashboardShell({
                     {resultsSummary.providerLabel}
                   </p>
                 </div>
+              </div>
               </div>
             )}
 
@@ -1020,15 +1585,21 @@ export function DashboardShell({
                         <p className="mt-1 text-sm text-slate-500">
                           {providerHealth.liveCount > 0
                             ? `${providerHealth.liveCount} live provider${providerHealth.liveCount > 1 ? "s are" : " is"} active for this search.`
-                            : "No live provider returned usable results for this search, so fallback coverage may be used."}
+                            : searchMeta?.usedFallback
+                              ? "Sample fallback was used because live providers did not return usable jobs."
+                              : "No live provider returned usable results for this search yet."}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                           Active providers: {providerHealth.activeCount}
                         </span>
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
-                          Fallback used: {providerHealth.fallbackCount}
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-medium ${
+                            providerHealth.fallbackCount > 0 ? "bg-amber-50 text-amber-900" : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {providerHealth.fallbackCount > 0 ? `Sample fallback used: ${providerHealth.fallbackCount}` : "Sample fallback off"}
                         </span>
                       </div>
                     </div>
@@ -1060,20 +1631,33 @@ export function DashboardShell({
                 )}
               </div>
             )}
+            {trustedSourcePanel}
             {searchStatus.type === "loading" ? (
               <ResultSkeleton />
-            ) : sortedResults.length === 0 ? (
-              <EmptyState
-                title={searchFeedbackState?.title ?? "No jobs found yet"}
-                description={searchFeedbackState?.description ?? "Try broadening your title, removing a strict filter, or searching again in a moment."}
-                nextStep={searchFeedbackState?.nextStep ?? "Adjust one filter, then search again."}
-                details={searchFeedbackState?.details}
-                variant={searchFeedbackState?.variant ?? "warning"}
-              />
+            ) : filteredResults.length === 0 ? (
+              <div className="space-y-4">
+                <EmptyState
+                  title={selectedCategory ? `No ${selectedCategory} jobs in this result set` : searchFeedbackState?.title ?? "No jobs found yet"}
+                  description={
+                    selectedCategory
+                      ? `Your current search returned jobs, but none of them are in the ${selectedCategory} category.`
+                      : searchFeedbackState?.description ?? "Try broadening your title, removing a strict filter, or searching again in a moment."
+                  }
+                  nextStep={selectedCategory ? "Clear the category filter or run a broader search." : searchFeedbackState?.nextStep ?? "Adjust one filter, then search again."}
+                  details={selectedCategory ? ["Use Clear filter to return to the full result set.", "Try a broader role title if you want more category coverage."] : searchFeedbackState?.details}
+                  variant={selectedCategory ? "warning" : searchFeedbackState?.variant ?? "warning"}
+                />
+              </div>
             ) : view === "cards" ? (
               <div className="grid gap-4">
-                {sortedResults.map((job) => (
-                  <JobCard key={`${job.source}-${job.externalJobId}`} job={job} selected={selectedJob?.externalJobId === job.externalJobId} onInspect={setSelectedJob} onSave={saveJob} />
+                {filteredResults.map((job) => (
+                  <JobCard
+                    key={`${job.source}-${job.externalJobId}`}
+                    job={job}
+                    selected={visibleSelectedJob?.externalJobId === job.externalJobId}
+                    onInspect={setSelectedJob}
+                    onSave={saveJob}
+                  />
                 ))}
               </div>
             ) : (
@@ -1089,7 +1673,7 @@ export function DashboardShell({
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedResults.map((job) => (
+                    {filteredResults.map((job) => (
                       <tr key={job.externalJobId} className="border-t border-slate-100">
                         <td className="px-4 py-3">
                           <p className="font-medium text-slate-900">{job.title}</p>
@@ -1243,21 +1827,21 @@ export function DashboardShell({
               </div>
             </div>
 
-            {selectedJob ? (
+            {visibleSelectedJob ? (
               <div className="mt-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xl font-semibold text-slate-950">{selectedJob.title}</p>
-                    <p className="text-sm text-slate-500">{selectedJob.company}</p>
+                    <p className="text-xl font-semibold text-slate-950">{visibleSelectedJob.title}</p>
+                    <p className="text-sm text-slate-500">{visibleSelectedJob.company}</p>
                   </div>
                   <div className="w-full max-w-[220px]">
-                    <MatchScore score={selectedJob.matchScore} reasons={selectedJob.matchReasons} />
+                    <MatchScore score={visibleSelectedJob.matchScore} reasons={visibleSelectedJob.matchReasons} />
                   </div>
                 </div>
                 <div className="rounded-[1.5rem] bg-white p-5 ring-1 ring-slate-200">
                   <p className="font-semibold text-slate-900">Why this matched</p>
                   <ul className="mt-3 space-y-2 text-sm leading-7 text-slate-600">
-                    {selectedJob.matchReasons.map((reason) => (
+                    {visibleSelectedJob.matchReasons.map((reason) => (
                       <li key={reason}>- {reason}</li>
                     ))}
                   </ul>

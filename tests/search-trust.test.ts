@@ -69,8 +69,35 @@ describe("buildResultsSummary", () => {
     });
 
     expect(summary.providerTone).toBe("fallback");
-    expect(summary.providerLabel).toContain("Fallback providers kept results available");
+    expect(summary.providerLabel).toContain("Sample fallback kept results visible");
     expect(summary.resumeLabel).toContain("Search filters");
+  });
+
+  it("reports live-only no-match state when fallback is disabled", () => {
+    const summary = buildResultsSummary({
+      results: [],
+      providerStatuses: [
+        {
+          source: "RemoteOK",
+          sourceType: "live",
+          status: "no_matches",
+          results: 0
+        },
+        {
+          source: "MockLever",
+          sourceType: "mock",
+          status: "disabled",
+          results: 0,
+          message: "Sample fallback is turned off for this environment so only live jobs are shown."
+        }
+      ],
+      usedFallback: false,
+      hasResume: true
+    });
+
+    expect(summary.providerTone).toBe("live");
+    expect(summary.providerLabel).toContain("no live jobs matched");
+    expect(summary.resumeLabel).toBe("Resume-based ranking is active.");
   });
 });
 

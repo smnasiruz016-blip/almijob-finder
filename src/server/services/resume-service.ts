@@ -75,6 +75,6 @@ export async function getLatestParsedResume(userId: string) {
     experienceKeywords: resume.experienceKeywords,
     educationKeywords: resume.educationKeywords,
     preferredRoles: resume.preferredRoles,
-    rawText: resume.extractedText
+    rawText: resume.extractedText ?? ""
   };
 }

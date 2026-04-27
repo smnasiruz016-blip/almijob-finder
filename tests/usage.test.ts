@@ -45,7 +45,7 @@ describe("usage limits", () => {
 
   it("blocks free users when the daily limit is reached", async () => {
     prisma.user.findUnique.mockResolvedValue({ subscriptionTier: "FREE" });
-    prisma.searchHistory.count.mockResolvedValue(5);
+    prisma.searchHistory.count.mockResolvedValue(25);
 
     const { assertUserCanSearch, SearchLimitExceededError } = await import("@/server/services/usage");
 
@@ -61,13 +61,13 @@ describe("usage limits", () => {
 
     expect(usage).toEqual({
       dailyUsed: 2,
-      dailyLimit: 5,
-      remaining: 3,
+      dailyLimit: 25,
+      remaining: 23,
       tier: "FREE",
       plan: {
         tier: "FREE",
         label: "Free",
-        dailySearchLimit: 5,
+        dailySearchLimit: 25,
         features: {
           canUseAlerts: false,
           canUseResumeInsights: false,

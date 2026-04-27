@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "sources:import": "node scripts/import-job-source-directory.mjs src/server/data/job-source-directory.json"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

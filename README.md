@@ -1,6 +1,6 @@
 # AlmiJob Finder
 
-AlmiJob Finder is a beta-ready job search web app built for `almiworld` with Next.js, TypeScript, Tailwind, Prisma, and PostgreSQL. Users can create an account, upload a resume, search live and fallback job sources through adapters, search worldwide or by country/state/city, rank jobs by resume fit, save jobs and searches, review resume suggestions, and use a stub-backed alert workflow while real delivery infrastructure is still being finalized.
+AlmiJob Finder is a beta-ready job search web app built for `almiworld` with Next.js, TypeScript, Tailwind, Prisma, and PostgreSQL. Users can create an account, upload a resume, search live job sources through adapters, search worldwide or by country/state/city, rank jobs by resume fit, save jobs and searches, review resume suggestions, and use a stub-backed alert workflow while real delivery infrastructure is still being finalized.
 
 ## Implementation Summary
 
@@ -60,7 +60,7 @@ AlmiJob Finder is a beta-ready job search web app built for `almiworld` with Nex
 - A package manager such as `pnpm` or `npm`
 
 ### Steps
-1. Copy `.env.example` to `.env` and update `DATABASE_URL`.
+1. Copy `.env.example` to `.env` and update both `DATABASE_URL` and `DIRECT_URL`.
 2. Install dependencies:
 
 ```bash
@@ -88,6 +88,41 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Supabase + Vercel Notes
+
+For a Supabase-backed deployment:
+
+- `DATABASE_URL` should use the Supabase pooler connection string.
+- `DIRECT_URL` should use a direct or session-capable connection string that Prisma can use for schema operations.
+- The Prisma datasource is configured to use:
+  - `url = env("DATABASE_URL")` for the app/runtime
+  - `directUrl = env("DIRECT_URL")` for `prisma db push`
+
+Before redeploying on Vercel, make sure these environment variables are set in the Vercel project:
+
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `NEXT_PUBLIC_APP_URL`
+- `CRON_SECRET`
+- `REMOTE_OK_ENABLED`
+- `REMOTE_OK_API_URL`
+- `REMOTE_OK_REVALIDATE_SECONDS`
+- `REMOTIVE_ENABLED`
+- `REMOTIVE_API_URL`
+- `REMOTIVE_REVALIDATE_SECONDS`
+- `JOOBLE_ENABLED`
+- `JOOBLE_API_URL`
+- `JOOBLE_API_KEY`
+- `ADZUNA_ENABLED`
+- `ADZUNA_API_URL`
+- `ADZUNA_APP_ID`
+- `ADZUNA_APP_KEY`
+- `ALERT_DELIVERY_MODE`
+- `ANALYTICS_ENABLED`
+- `ANALYTICS_PROVIDER`
+
+If you are using local storage in development, keep in mind that uploaded resume storage is still local-only by default. For Vercel, move to a persistent storage backend before treating file uploads as production-hardened.
+
 ### Demo Accounts
 - Admin: `admin@almijobfinder.dev` / `Password123!`
 - User: `demo@almijobfinder.dev` / `Password123!`
@@ -108,16 +143,17 @@ export interface JobSourceAdapter {
 Current implementation:
 - `RemoteOK` live adapter
 - `Remotive` public API adapter
+- `Jooble` live adapter when an API key is configured
 - `Adzuna` live adapter when credentials are configured
 - `MockGreenhouse`
 - `MockLever`
 - `MockWorkable`
 
 The app supports worldwide searches in two ways:
-- `Worldwide` or blank country searches work through Remote OK, Remotive, plus mock fallback data.
+- `Worldwide` or blank country searches work through Remote OK and Remotive live data.
 - Country-specific searches can also use Adzuna when `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are configured for supported countries.
 
-The app first tries each live adapter independently and keeps going even if one provider fails. If no live providers return usable jobs, it falls back to mock provider data. This avoids unsupported scraping while keeping the product usable during outages or local development.
+The app first tries each live adapter independently and keeps going even if one provider fails. If no live providers return usable jobs, the app can optionally fall back to mock provider data for internal demos or local development. For real beta users, keep sample fallback disabled so only live jobs are shown.
 
 Provider environment variables:
 - `REMOTE_OK_ENABLED`: set to `false` to disable Remote OK
@@ -126,9 +162,13 @@ Provider environment variables:
 - `REMOTIVE_ENABLED`: set to `false` to disable Remotive
 - `REMOTIVE_API_URL`: override the Remotive public API endpoint if needed
 - `REMOTIVE_REVALIDATE_SECONDS`: conservative cache interval for the Remotive public API request
+- `JOOBLE_ENABLED`: set to `false` to disable Jooble
+- `JOOBLE_API_URL`: base Jooble API URL
+- `JOOBLE_API_KEY`: required for Jooble live results
 - `ADZUNA_ENABLED`: set to `false` to disable Adzuna entirely
 - `ADZUNA_API_URL`: base Adzuna API URL
 - `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`: required for Adzuna live results
+- `MOCK_FALLBACK_ENABLED`: set to `false` for production or family testing so only live jobs are shown
 - `ANALYTICS_ENABLED`: set to `false` to silence product event hooks
 - `ANALYTICS_PROVIDER`: currently `log`, with a clean abstraction point for a future analytics vendor
 
@@ -147,6 +187,11 @@ Remotive note:
 - The app is wired to `https://remotive.com/api/remote-jobs` by default through `REMOTIVE_API_URL`.
 - The normalized output preserves Remotive attribution and uses the Remotive job URL so the UI can show the source clearly.
 - The public API has usage constraints and delayed listings, so the integration uses a conservative cache interval and does not scrape the site.
+
+Jooble note:
+- The app is wired to `https://jooble.org/api` by default through `JOOBLE_API_URL`.
+- Jooble requires `JOOBLE_API_KEY` to be configured before the adapter will run.
+- This adapter is useful for stronger location-based coverage beyond the mostly remote inventories from RemoteOK and Remotive.
 
 ## Alerts
 

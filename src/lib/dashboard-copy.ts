@@ -37,14 +37,27 @@ export function buildSearchFeedbackState(state: SearchFeedbackState) {
     };
   }
 
-  if (state.message.toLowerCase().includes("live job source is unavailable")) {
+  if (state.message.toLowerCase().includes("live job providers are temporarily unavailable")) {
     return {
       title: "Live providers are temporarily unavailable",
       description: state.message,
-      nextStep: "Try again shortly or broaden your search so fallback coverage has more room to help.",
+      nextStep: "Try again shortly or broaden your search with a wider title or country.",
       details: [
-        "Your search still ran successfully.",
-        "This usually clears on its own without any action on your side."
+        "This usually clears on its own without any action on your side.",
+        "You can also try a remote or worldwide search to widen coverage."
+      ],
+      variant: "warning" as const
+    };
+  }
+
+  if (state.message.toLowerCase().includes("no live jobs matched")) {
+    return {
+      title: "No live jobs matched yet",
+      description: state.message,
+      nextStep: "Try a broader role title, switch to Worldwide, or remove one strict filter.",
+      details: [
+        "Start broad, then narrow after you see where live jobs are available.",
+        "Adding one focused keyword can improve the next live result set."
       ],
       variant: "warning" as const
     };

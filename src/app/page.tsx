@@ -1,7 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, BarChart3, BriefcaseBusiness, CheckCircle2, SearchCode, UploadCloud } from "lucide-react";
+import { ArrowRight, BarChart3, BriefcaseBusiness, CheckCircle2, Home, SearchCode, UploadCloud } from "lucide-react";
+import { CountryHiringPanel } from "@/components/dashboard/country-hiring-panel";
 import { getCurrentUser } from "@/lib/auth";
+import { buildCountryRoleLinks } from "@/lib/country-role-guidance";
+import { getCountryHiringHighlights } from "@/server/services/company-vacancies";
+import { getDetectedCountry } from "@/server/services/country-detection";
+import { executeJobSearch } from "@/server/services/job-search";
+import { getTrustedSourcesForCountry } from "@/server/services/source-directory";
 
 const steps = [
   {
@@ -22,10 +28,10 @@ const steps = [
 ];
 
 const benefits = [
-  "Resume-aware ranking that explains why jobs match",
-  "Live-ready adapter system with a real provider and safe fallback data",
-  "Saved jobs, saved searches, and alert-ready workflow",
-  "Freemium-ready usage tracking and launch-minded product UX"
+  "Understand exactly why each job fits you",
+  "Discover real opportunities from trusted sources",
+  "Save and organize roles that matter",
+  "Stay consistent with smart alerts and resume insights"
 ];
 
 const capabilityList = [
@@ -46,8 +52,18 @@ const productSignals = [
 
 export default async function HomePage() {
   const user = await getCurrentUser();
+  const detectedCountry = await getDetectedCountry();
+  const [countryHighlights, trustedCountrySources, countrySampleSearch] = await Promise.all([
+    getCountryHiringHighlights(detectedCountry),
+    getTrustedSourcesForCountry(detectedCountry),
+    executeJobSearch({ desiredTitle: "", country: detectedCountry })
+  ]);
+  const sampleJobs = countrySampleSearch.results
+    .filter((job) => job.sourceType === "live" && job.source !== "Almiworld Employers")
+    .slice(0, 4);
   const primaryHref = user ? "/dashboard" : "/signup";
   const uploadHref = user ? "/dashboard#search" : "/signup";
+  const roleSuggestions = buildCountryRoleLinks(detectedCountry, user ? "/dashboard" : "/signup");
 
   return (
     <main className="pb-20">
@@ -55,7 +71,13 @@ export default async function HomePage() {
         <nav className="glass-panel flex flex-col gap-4 rounded-[2rem] px-5 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-4">
-              <Image src="/brand/almi-latest.png" alt="Almiworld" width={170} height={60} className="h-auto w-[140px] md:w-[170px]" />
+              <a
+                href="https://www.almiworld.com"
+                className="rounded-2xl focus:outline-none focus:ring-4 focus:ring-teal-100"
+                aria-label="Go to Almiworld home"
+              >
+                <Image src="/brand/almi-latest.png" alt="Almiworld" width={170} height={60} className="h-auto w-[140px] md:w-[170px]" />
+              </a>
               <div>
                 <p className="font-[family-name:var(--font-display)] text-xl font-bold text-slate-950">AlmiJob Finder</p>
                 <p className="text-sm text-slate-500">almiworld&apos;s advanced job discovery product with resume-first matching.</p>
@@ -63,6 +85,13 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm font-medium">
+            <a
+              href="https://www.almiworld.com"
+              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-slate-600 transition hover:bg-slate-100"
+            >
+              <Home className="h-4 w-4" />
+              Home
+            </a>
             {!user && (
               <Link href="/login" className="rounded-full px-4 py-2 text-slate-600 transition hover:bg-slate-100">
                 Log in
@@ -70,7 +99,7 @@ export default async function HomePage() {
             )}
             <Link
               href={primaryHref}
-              className="rounded-full bg-slate-950 px-5 py-2.5 text-white transition hover:bg-slate-800"
+              className="rounded-full bg-teal-100 px-5 py-2.5 text-teal-900 transition hover:bg-teal-200"
             >
               {user ? "Open dashboard" : "Start free"}
             </Link>
@@ -79,7 +108,7 @@ export default async function HomePage() {
 
         <div className="grid gap-8 pb-16 pt-10 md:grid-cols-[1.08fr_0.92fr] md:items-center md:pt-16">
           <div className="space-y-6">
-            <span className="eyebrow">Launch-ready job search</span>
+            <span className="eyebrow">Resume-based job search</span>
             <div className="space-y-4">
               <h1 className="section-title max-w-4xl font-[family-name:var(--font-display)]">
                 Find Jobs Faster Using Your Resume
@@ -181,6 +210,17 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <section className="page-shell pt-6">
+        <CountryHiringPanel
+          title={`Browse jobs in ${detectedCountry}`}
+          description="Visitors should be able to see local hiring signals even before they upload a resume or run a narrow search."
+          highlights={countryHighlights}
+          trustedSources={trustedCountrySources}
+          sampleJobs={sampleJobs}
+          roleSuggestions={roleSuggestions}
+        />
+      </section>
+
       <section className="page-shell pt-2">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {capabilityList.map((item) => (
@@ -206,7 +246,8 @@ export default async function HomePage() {
           <div className="flex flex-wrap gap-3">
             <Link
               href={primaryHref}
-              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-medium text-slate-950 transition hover:bg-slate-100"
+              className="inline-flex items-center gap-2 rounded-full bg-teal-300 px-5 py-3 font-semibold !text-slate-950 shadow-[0_12px_30px_rgba(45,212,191,0.28)] transition hover:bg-teal-200"
+              style={{ backgroundColor: "#5eead4", color: "#0f172a" }}
             >
               Start Free
               <ArrowRight className="h-4 w-4" />
