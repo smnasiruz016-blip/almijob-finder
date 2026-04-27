@@ -43,6 +43,7 @@ function mapRowsToLinks(rows: JobSourceSeedRow[]) {
     url: row.url,
     category: row.category,
     note: row.notes,
+    country: row.country,
     region: row.region,
     sourcePriority: row.sourcePriority,
     hasApi: row.hasApi,
@@ -73,10 +74,11 @@ function mergeTrustedSources(country: string | undefined, primary: JobSourceLink
     return uniqueByName([...primary, ...fallback]).slice(0, 6);
   }
 
-  const fallbackLocal = fallback.filter((item) => item.region !== "Worldwide");
-  const fallbackGlobal = fallback.filter((item) => item.region === "Worldwide" || !item.region);
-  const primaryLocal = primary.filter((item) => item.region !== "Worldwide");
-  const primaryGlobal = primary.filter((item) => item.region === "Worldwide" || !item.region);
+  const isLocal = (item: JobSourceLink) => item.country === normalizedCountry;
+  const fallbackLocal = fallback.filter(isLocal);
+  const fallbackGlobal = fallback.filter((item) => !isLocal(item));
+  const primaryLocal = primary.filter(isLocal);
+  const primaryGlobal = primary.filter((item) => !isLocal(item));
 
   return sortTrustedSourcesForCountry(normalizedCountry, [
     ...fallbackLocal,
@@ -114,11 +116,11 @@ function sortTrustedSourcesForCountry(country: string, items: JobSourceLink[]) {
       }
     }
 
-    const leftGlobal = left.region === "Worldwide" || !left.region;
-    const rightGlobal = right.region === "Worldwide" || !right.region;
+    const leftIsLocal = left.country === country;
+    const rightIsLocal = right.country === country;
 
-    if (leftGlobal !== rightGlobal) {
-      return leftGlobal ? 1 : -1;
+    if (leftIsLocal !== rightIsLocal) {
+      return leftIsLocal ? -1 : 1;
     }
 
     return (left.sourcePriority ?? 999) - (right.sourcePriority ?? 999);
@@ -188,6 +190,7 @@ export async function getTrustedSourcesForCountry(country?: string): Promise<Job
         url: row.url,
         category: row.category,
         note: row.notes ?? "Trusted job source for this market.",
+        country: row.country,
         region: row.region,
         sourcePriority: row.sourcePriority,
         hasApi: row.hasApi,

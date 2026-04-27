@@ -181,5 +181,15 @@ export function rankJobs(
         missingKeywords: dedupe(missingKeywords).slice(0, 6)
       };
     })
-    .sort((left, right) => right.matchScore - left.matchScore);
+    .sort((left, right) => {
+      if (search.country && !isWorldwideFilter(search.country)) {
+        const searchCountry = normalize(search.country);
+        const leftIsLocal = normalize(left.location).includes(searchCountry);
+        const rightIsLocal = normalize(right.location).includes(searchCountry);
+        if (leftIsLocal !== rightIsLocal) {
+          return leftIsLocal ? -1 : 1;
+        }
+      }
+      return right.matchScore - left.matchScore;
+    });
 }

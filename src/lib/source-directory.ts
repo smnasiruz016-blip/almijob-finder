@@ -99,5 +99,9 @@ export function getTrustedSourcesForCountry(country?: string) {
     return GLOBAL_SOURCES;
   }
 
-  return uniqueByName([...(COUNTRY_SOURCE_DIRECTORY[normalizedCountry] ?? []), ...GLOBAL_SOURCES]).slice(0, 5);
+  const local = (COUNTRY_SOURCE_DIRECTORY[normalizedCountry] ?? []).map((item) => ({
+    ...item,
+    country: normalizedCountry
+  }));
+  return uniqueByName([...local, ...GLOBAL_SOURCES]).slice(0, 5);
 }

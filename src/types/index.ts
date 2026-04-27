@@ -190,6 +190,7 @@ export type JobSourceLink = {
   url: string;
   category: string;
   note: string;
+  country?: string;
   region?: string;
   sourcePriority?: number;
   hasApi?: boolean;
