@@ -212,20 +212,22 @@ export function CountryHiringPanel({
           </div>
           <div className={`mt-3 grid gap-3 ${compact ? "" : "md:grid-cols-2 xl:grid-cols-3"}`}>
             {trustedSources.slice(0, compact ? 3 : 6).map((source) => (
-              <a
+              <div
                 key={`${highlights.country}-${source.name}`}
-                href={source.url}
-                target="_blank"
-                rel="noreferrer"
                 className="rounded-[1.25rem] border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-teal-200 hover:bg-white hover:shadow-sm"
               >
-                <div className="flex items-start justify-between gap-3">
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start justify-between gap-3"
+                >
                   <div>
                     <p className="font-semibold text-slate-900">{source.name}</p>
                     <p className="mt-1 text-sm leading-6 text-slate-500">{source.note}</p>
                   </div>
                   <ExternalLink className="mt-1 h-4 w-4 text-slate-400" />
-                </div>
+                </a>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {sourceBadges(source).map((badge) => (
                     <span key={`${source.name}-${badge}`} className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 ring-1 ring-slate-200">
@@ -233,7 +235,16 @@ export function CountryHiringPanel({
                     </span>
                   ))}
                 </div>
-              </a>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex min-h-[44px] w-full items-center justify-center rounded-2xl px-4 py-2.5 font-semibold transition hover:opacity-90 focus:outline-none focus:ring-4 focus:ring-teal-200"
+                  style={{ backgroundColor: "#5EEAD4", color: "#0F1729" }}
+                >
+                  Search on {source.name} →
+                </a>
+              </div>
             ))}
           </div>
         </div>
